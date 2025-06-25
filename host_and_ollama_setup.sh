@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s inherit_errexit lastpipe
 
 #–– Logging must match autogen.sh’s LOG_FILE ––#
-# use double quotes for the outer trap so we can safely embed single-quoted date fmt
+# Use a double-quoted trap string so the inner date +'%F %T' stays intact:
 trap "
   rc=\$?;
   echo \"\$(date +'%F %T') [HOST_SETUP][ERROR] line \$LINENO: \\\"\$BASH_COMMAND\\\" (exit \$rc)\" \
@@ -66,10 +66,11 @@ run_cmd sudo tar -C "$DESTDIR" -xzf "${TMPDIR}/ollama-portable.tgz" \
 log "Starting Ollama service…"
 run_cmd sudo chmod +x "${DESTDIR}/start-ollama.sh"
 # run in background, logging its output (must be passed as one string)
+# capture your IPEX log path
 LOG_IPEX=/var/log/ollama-ipex.log
-run_cmd \"sudo nohup \\
-  \\\\"${DESTDIR}/start-ollama.sh\\\\\" \\
-  > \\\\\\"${LOG_IPEX}\\\\\" 2>&1 &\"
+# pass the entire background invocation as a single string
+run_cmd "sudo nohup \"${DESTDIR}/start-ollama.sh\" \
+  > \"${LOG_IPEX}\" 2>&1 &"
 
 # note: if DRY_RUN=false this actually backgrounds; if true you’ll see the whole
 # string echoed but nothing runs.
