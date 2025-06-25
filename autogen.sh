@@ -4,41 +4,62 @@
 ###############################################################################
 set -Eeuo pipefail
 shopt -s inherit_errexit lastpipe
-trap 'rc=$?; echo "$(date +'%F %T') [ERROR] at line $LINENO: \"$BASH_COMMAND\" (exit $rc)" | tee -a /var/log/autogen_setup.log >&2' ERR
-cd /   # NOTHING before this (avoids dpkg-hook “Permission denied”)
 
-#######################################  constants & colours  #################
+#–– Defined before trap so all logging writes to the same file ––#
+readonly LOG_FILE=/var/log/autogenstudio/autogen_setup.log
+mkdir -p "$(dirname "$LOG_FILE")"
+DRY_RUN=false
+# track if user passed --ollama-url
+OLLAMA_API_URL_CMDLINE=false
+
+trap 'rc=$?; echo "$(date +'%F %T') [ERROR] at line $LINENO: \"$BASH_COMMAND\" (exit $rc)" | tee -a "$LOG_FILE" >&2' ERR
+
+# nothing before this to avoid dpkg hook issues
+cd /
+
+###############################################################################
+# constants & colours
+###############################################################################
 readonly SCRIPT_NAME="${0##*/}"
-readonly COLOR_RESET=$'\e[0m'; readonly RED=$'\e[31m'; readonly YELLOW=$'\e[33m'; readonly GREEN=$'\e[32m'
+readonly COLOR_RESET=$'\e[0m'
+readonly RED=$'\e[31m'
+readonly YELLOW=$'\e[33m'
+readonly GREEN=$'\e[32m'
 
-#######################################  mutable globals  #####################
-ASSUME_YES=false
+###############################################################################
+# mutable globals & defaults
+###############################################################################
 START_DAEMON=false
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.6.2}"
-TARGET_USER='' TARGET_HOME='' VENV_DIR='' APPDIR='' ENV_FILE=''
-HOST_SETUP_SCRIPT="$(dirname "$0")/host_and_ollama_setup.sh"
+TARGET_USER=''
+TARGET_HOME=''
+VENV_DIR=''
+APPDIR=''
+ENV_FILE=''
+# use BASH_SOURCE so symlinks still resolve
+HOST_SETUP_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/host_and_ollama_setup.sh"
 
-#------------------------------------------------------------------------------
-# Install local Ollama via Intel IPEX-LLM portable-zip
-install_local_ollama() {
-  if [ ! -x "$HOST_SETUP_SCRIPT" ]; then
-    error "Cannot find host+ollama setup script at $HOST_SETUP_SCRIPT"
-    exit 1
+###############################################################################
+# helpers: logging & dry-run
+###############################################################################
+log()   { printf '%s %b[INFO ]%b  %s\n' "$(date +'%F %T')" "$GREEN"  "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
+warn()  { printf '%s %b[WARN ]%b  %s\n' "$(date +'%F %T')" "$YELLOW" "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
+error() { printf '%s %b[ERROR]%b %s\n' "$(date +'%F %T')" "$RED"    "$COLOR_RESET" "$*" | tee -a "$LOG_FILE" >&2; }
+
+run_cmd() {
+  if [[ "$DRY_RUN" == true ]]; then
+    printf 'DRY-RUN: %q\n' "$*"
+  else
+    eval "$@"
   fi
-  log "Installing local Ollama (no external URL given)…"
-  "$HOST_SETUP_SCRIPT" || {
-    error "host_and_ollama_setup.sh failed"
-    exit 1
-  }
-  # point the API client at our new local instance:
-  export OLLAMA_API_URL="http://localhost:11434"
-  log "Set OLLAMA_API_URL=$OLLAMA_API_URL"
 }
 
+###############################################################################
+# CLI parsing
+###############################################################################
 usage() {
   cat <<USAGE
 Usage: sudo $SCRIPT_NAME [OPTIONS]
-  -y, --assume-yes     Non-interactive (accept defaults)
   -n, --dry-run        Show what would happen, change nothing
   -d, --daemon         Start Studio immediately (systemd always installed)
   --ollama-url URL     Use an external Ollama endpoint (skip local install)
@@ -46,32 +67,35 @@ Usage: sudo $SCRIPT_NAME [OPTIONS]
 USAGE
 }
 
-if [ -z "${OLLAMA_API_URL:-}" ]; then
-  install_local_ollama
-fi
-
-#######################################  logging helpers  #####################
-log()   { printf '%s %b[INFO ]%b  %s\n'  "$(date +'%F %T')" "$GREEN"  "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
-warn()  { printf '%s %b[WARN ]%b  %s\n'  "$(date +'%F %T')" "$YELLOW" "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
-error() { printf '%s %b[ERROR]%b %s\n'   "$(date +'%F %T')" "$RED"    "$COLOR_RESET" "$*" | tee -a "$LOG_FILE" >&2; }
-
-#######################################  helpers  #############################
-run_cmd() { $DRY_RUN && { printf 'DRY-RUN: %q\n' "$*"; return; }; eval "$@"; }
-
-#######################################  cli parsing  #########################
-PARSED=$(getopt -o yndh -l assume-yes,dry-run,daemon,help,ollama-url: -- "$@") || { usage; exit 1; }
+# only ndh since we dropped -y/--assume-yes
+PARSED=$(getopt -o ndh -l dry-run,daemon,help,ollama-url: -- "$@") || { usage; exit 1; }
 eval set -- "$PARSED"
 while true; do
   case $1 in
-    -y|--assume-yes) ASSUME_YES=true ;;
-    -n|--dry-run)    DRY_RUN=true ;;
-    -d|--daemon)     START_DAEMON=true ;;
-    --ollama-url) OLLAMA_API_URL="$2"; shift 2 ;;
-    -h|--help)       usage; exit 0 ;;
+    -n|--dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -d|--daemon)
+      START_DAEMON=true
+      shift
+      ;;
+    --ollama-url)
+      OLLAMA_API_URL="$2"
+      OLLAMA_API_URL_CMDLINE=true
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     --) shift; break ;;
-  esac; shift; done
+  esac
+done
 
-#######################################  pre-flight  ##########################
+###############################################################################
+# pre-flight: must be root, find real user & home, load .env
+###############################################################################
 [[ $EUID -eq 0 ]] || { error "Run with sudo/root."; exit 1; }
 if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
   TARGET_USER=$SUDO_USER
@@ -82,18 +106,17 @@ fi
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 VENV_DIR="$TARGET_HOME/autogen"
 APPDIR="$TARGET_HOME/.autogenstudio"
-# point at our real .env
 ENV_FILE="$VENV_DIR/.env"
+
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
 else
   error "Missing .env file at $ENV_FILE"; exit 1
 fi
-mkdir -p "$APPDIR" "${LOG_FILE%/*}"
 
 ###############################################################################
-# 1) base packages + self-healing helpers
+# 1) Base packages & helpers
 ###############################################################################
 readonly PKGS=(
   python3 python3-venv python3-pip python3-dev build-essential
@@ -103,7 +126,12 @@ readonly PKGS=(
 declare -A CMD_PKG=( [setfacl]=acl [nft]=nftables )
 
 apt_updated=false
-_apt_update() { $apt_updated || { run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq update; apt_updated=true; }; }
+_apt_update() {
+  if [[ $apt_updated == false ]]; then
+    run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq update
+    apt_updated=true
+  fi
+}
 ensure_pkg() {
   dpkg -s "$1" &>/dev/null && return
   _apt_update
@@ -111,35 +139,50 @@ ensure_pkg() {
 }
 require_cmd() {
   command -v "$1" &>/dev/null && return
-  [[ -n ${CMD_PKG[$1]:-} ]] && { log "Installing ${CMD_PKG[$1]} for missing $1"; ensure_pkg "${CMD_PKG[$1]}"; }
-  command -v "$1" &>/dev/null || { error "$1 still missing after attempted fix"; exit 1; }
+  [[ -n ${CMD_PKG[$1]:-} ]] && {
+    log "Installing ${CMD_PKG[$1]} for missing $1"
+    ensure_pkg "${CMD_PKG[$1]}"
+  }
+  command -v "$1" &>/dev/null || { error "$1 still missing"; exit 1; }
 }
 
-if ! $DRY_RUN; then export DEBIAN_FRONTEND=noninteractive; fi
-for p in "${PKGS[@]}"; do ensure_pkg "$p"; done
+if [[ "$DRY_RUN" != true ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+fi
+for pkg in "${PKGS[@]}"; do
+  ensure_pkg "$pkg"
+done
+
 run_cmd systemctl enable --now postgresql
-run_cmd systemctl enable --now nftables            # persists firewall rules
+run_cmd systemctl enable --now nftables
 
 ###############################################################################
-# 2) PostgreSQL role, db, and HBA fix
+# 2) PostgreSQL role, db & HBA fix
 ###############################################################################
-role_exists() { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_roles WHERE rolname='$AUTOGEN_DB_USER';"; }
-db_exists()   { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_database WHERE datname='$AUTOGEN_DB_NAME';"; }
-
+role_exists() {
+  sudo -u postgres psql -tAqc "SELECT 1 FROM pg_roles WHERE rolname='${AUTOGEN_DB_USER}'"
+}
+db_exists() {
+  sudo -u postgres psql -tAqc "SELECT 1 FROM pg_database WHERE datname='${AUTOGEN_DB_NAME}'"
+}
 DB_PASS=${AUTOGEN_DB_PASS:-$(openssl rand -hex 12)}
 
-[[ $(role_exists) == 1 ]] || run_cmd sudo -u postgres psql -qc "CREATE USER $AUTOGEN_DB_USER PASSWORD '$DB_PASS';"
-[[ $(db_exists)   == 1 ]] || run_cmd sudo -u postgres createdb -O "$AUTOGEN_DB_USER" "$AUTOGEN_DB_NAME"
+if ! role_exists | grep -q 1; then
+  run_cmd sudo -u postgres psql -qc "CREATE USER ${AUTOGEN_DB_USER} PASSWORD '${DB_PASS}';"
+fi
+if ! db_exists | grep -q 1; then
+  run_cmd sudo -u postgres createdb -O "${AUTOGEN_DB_USER}" "${AUTOGEN_DB_NAME}"
+fi
 
 PG_HBA=$(sudo -u postgres psql -tAqc 'SHOW hba_file;')
-if ! grep -qE "^[[:space:]]*local[[:space:]]+all[[:space:]]+$AUTOGEN_DB_USER" "$PG_HBA"; then
-  run_cmd sudo awk -v user="$AUTOGEN_DB_USER" '
-      BEGIN{done=0}
-      /^[[:space:]]*local[[:space:]]+/ && !done{
-        print "local   all   " user "   scram-sha-256"
-        done=1
-      }
-      {print}
+if ! grep -qE "^[[:space:]]*local[[:space:]]+all[[:space:]]+${AUTOGEN_DB_USER}" "$PG_HBA"; then
+  run_cmd sudo awk -v user="${AUTOGEN_DB_USER}" '
+    BEGIN{done=0}
+    /^[[:space:]]*local[[:space:]]+/ && !done{
+      print "local   all   " user "   scram-sha-256"
+      done=1
+    }
+    {print}
   ' "$PG_HBA" > "$PG_HBA.tmp"
   run_cmd sudo mv "$PG_HBA.tmp" "$PG_HBA"
   run_cmd systemctl reload postgresql
@@ -159,35 +202,45 @@ run_cmd sudo -u "$TARGET_USER" "$VENV_DIR/bin/python" -m playwright install chro
 run_cmd chown -R "$TARGET_USER:$TARGET_USER" "$VENV_DIR" "$APPDIR"
 
 ###############################################################################
-# 4) .env generation (idempotent, validated)
+# 4) .env regeneration & validation
 ###############################################################################
-validate_env() { ! grep -vE '^\s*(#|$)' "$1" | grep -qvE '^[A-Za-z_][A-Za-z0-9_]*=.*$'; }
+validate_env() {
+  # returns success if every non-blank, non-comment line is VAR=VALUE
+  grep -vE '^\s*(#|$)' "$1" | grep -qvE '^[A-Za-z_][A-Za-z0-9_]*=.*$'
+  return $?
+}
 regen=false
-[[ ! -f "$ENV_FILE" || ! $(validate_env "$ENV_FILE") ]] && regen=true
+if [[ ! -f "$ENV_FILE" || validate_env "$ENV_FILE" ]]; then
+  regen=true
+fi
 
 urlencode() { jq -rn --arg v "$1" '$v|@uri'; }
 
-if $regen; then
+if [[ "$regen" == true ]]; then
   PASS_URI=$(urlencode "$DB_PASS")
   cat >"$ENV_FILE" <<EOF
-DB_NAME=$AUTOGEN_DB_NAME
-DB_USER=$AUTOGEN_DB_USER
-DB_PASSWORD=$DB_PASS
-DATABASE_URL=postgresql+psycopg://$AUTOGEN_DB_USER:$PASS_URI@localhost/$AUTOGEN_DB_NAME
-OLLAMA_API_URL=${OLLAMA_API_URL:-http://localhost:11434}
+# Auto-generated by autogen.sh
+LOG_FILE="$LOG_FILE"
+AUTOGEN_DB_USER="${AUTOGEN_DB_USER}"
+AUTOGEN_DB_NAME="${AUTOGEN_DB_NAME}"
+AUTOGEN_DB_PASS="${DB_PASS}"
+DATABASE_URL="postgresql+psycopg://${AUTOGEN_DB_USER}:${PASS_URI}@localhost/${AUTOGEN_DB_NAME}"
+OLLAMA_API_URL="${OLLAMA_API_URL:-http://localhost:11434}"
+OLLAMA_VERSION="${OLLAMA_VERSION}"
+DRY_RUN="${DRY_RUN}"
 EOF
   run_cmd chown "$TARGET_USER:$TARGET_USER" "$ENV_FILE"
   run_cmd chmod 600 "$ENV_FILE"
 fi
 
 ###############################################################################
-# 5) nftables snippet (ports 3000 & 11434)
+# 5) nftables snippet
 ###############################################################################
 require_cmd nft
 run_cmd mkdir -p /etc/nftables.d
 NFTA_SNIPPET='/etc/nftables.d/autogen.nft'
 if [[ ! -f $NFTA_SNIPPET ]]; then
-cat >"$NFTA_SNIPPET" <<'EOF'
+  cat >"$NFTA_SNIPPET" <<'EOF'
 table inet filter {
   chain input {
     type filter hook input priority 0;
@@ -198,8 +251,8 @@ table inet filter {
 }
 EOF
   run_cmd chmod 640 "$NFTA_SNIPPET"
-  grep -q autogen.nft /etc/nftables.conf 2>/dev/null ||
-     run_cmd bash -c "echo 'include \"${NFTA_SNIPPET}\"' >> /etc/nftables.conf"
+  grep -q autogen.nft /etc/nftables.conf 2>/dev/null || \
+    run_cmd bash -c "echo 'include \"${NFTA_SNIPPET}\"' >> /etc/nftables.conf"
   run_cmd nft -f /etc/nftables.conf
 fi
 
