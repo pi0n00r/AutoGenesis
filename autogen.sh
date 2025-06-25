@@ -62,15 +62,6 @@ error() { printf '%s %b[ERROR]%b %s\n'   "$(date +'%F %T')" "$RED"    "$COLOR_RE
 
 #######################################  helpers  #############################
 run_cmd() { $DRY_RUN && { printf 'DRY-RUN: %q\n' "$*"; return; }; eval "$@"; }
-usage() { cat <<USAGE
-Usage: sudo $SCRIPT_NAME [OPTIONS]
-  -y, --assume-yes     Non-interactive (accept defaults)
-  -n, --dry-run        Show what would happen, change nothing
-  -d, --daemon         Start Studio immediately (systemd always installed)
-      --ollama-url URL Use an external Ollama endpoint (skip local install)
-  -h, --help           This help text
-USAGE
-}
 
 #######################################  cli parsing  #########################
 PARSED=$(getopt -o yndh -l assume-yes,dry-run,daemon,help,ollama-url: -- "$@") || { usage; exit 1; }
@@ -87,7 +78,6 @@ while true; do
 
 #######################################  pre-flight  ##########################
 [[ $EUID -eq 0 ]] || { error "Run with sudo/root."; exit 1; }
-
 if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
   TARGET_USER=$SUDO_USER
 elif id -u pi &>/dev/null; then
@@ -110,7 +100,6 @@ readonly PKGS=(
   openssl libpq-dev postgresql postgresql-contrib acl
   curl ca-certificates gnupg jq iproute2 nftables unzip
 )
-
 declare -A CMD_PKG=( [setfacl]=acl [nft]=nftables )
 
 apt_updated=false
