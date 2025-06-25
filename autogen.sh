@@ -85,8 +85,8 @@ elif id -u pi &>/dev/null; then
 else
   error "Cannot determine non-root user"; exit 1
 fi
-TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 
+TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 VENV_DIR="$TARGET_HOME/autogen"
 APPDIR="$TARGET_HOME/.autogenstudio"
 ENV_FILE="$VENV_DIR/.env"
@@ -151,6 +151,7 @@ fi
 if [[ ! -f "$VENV_DIR/bin/activate" ]]; then
   run_cmd sudo -u "$TARGET_USER" python3 -m venv "$VENV_DIR"
 fi
+
 run_cmd sudo -u "$TARGET_USER" "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 run_cmd sudo -u "$TARGET_USER" "$VENV_DIR/bin/pip" install --quiet \
          autogenstudio "autogen-ext[ollama]" "autogen-ext[web-surfer]" psycopg[binary] playwright
