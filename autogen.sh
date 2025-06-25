@@ -66,7 +66,7 @@ while true; do
     -y|--assume-yes) ASSUME_YES=true ;;
     -n|--dry-run)    DRY_RUN=true ;;
     -d|--daemon)     START_DAEMON=true ;;
-    --ollama-url)    OLLAMA_API_URL=$2; shift ;;
+    --ollama-url) OLLAMA_API_URL="$2"; shift 2 ;;
     -h|--help)       usage; exit 0 ;;
     --) shift; break ;;
   esac; shift; done
