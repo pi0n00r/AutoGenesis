@@ -80,8 +80,6 @@ while true; do
 [[ $EUID -eq 0 ]] || { error "Run with sudo/root."; exit 1; }
 if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
   TARGET_USER=$SUDO_USER
-elif id -u pi &>/dev/null; then
-  TARGET_USER=pi
 else
   error "Cannot determine non-root user"; exit 1
 fi
