@@ -3,9 +3,12 @@ set -Eeuo pipefail
 shopt -s inherit_errexit lastpipe
 
 #–– Logging must match autogen.sh’s LOG_FILE ––#
-readonly LOG_FILE=/var/log/autogenstudio/autogen_setup.log
-mkdir -p "$(dirname "$LOG_FILE")"
-trap 'rc=$?; echo "$(date +'%F %T') [HOST_SETUP][ERROR] line $LINENO: \"$BASH_COMMAND\" (exit $rc)" | tee -a "$LOG_FILE" >&2' ERR
+# use double quotes for the outer trap so we can safely embed single-quoted date fmt
+trap "
+  rc=\$?;
+  echo \"\$(date +'%F %T') [HOST_SETUP][ERROR] line \$LINENO: \\\"\$BASH_COMMAND\\\" (exit \$rc)\" \
+    | tee -a \"\$LOG_FILE\" >&2
+" ERR
 
 #–– Find this script’s dir even when symlinked ––#
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,9 +65,14 @@ run_cmd sudo tar -C "$DESTDIR" -xzf "${TMPDIR}/ollama-portable.tgz" \
 
 log "Starting Ollama service…"
 run_cmd sudo chmod +x "${DESTDIR}/start-ollama.sh"
-# run in background, logging its output
-run_cmd sudo nohup "${DESTDIR}/start-ollama.sh" \
-  > /var/log/ollama-ipex.log 2>&1 &
+# run in background, logging its output (must be passed as one string)
+LOG_IPEX=/var/log/ollama-ipex.log
+run_cmd \"sudo nohup \\
+  \\\\"${DESTDIR}/start-ollama.sh\\\\\" \\
+  > \\\\\\"${LOG_IPEX}\\\\\" 2>&1 &\"
+
+# note: if DRY_RUN=false this actually backgrounds; if true you’ll see the whole
+# string echoed but nothing runs.
 
 log "Ollama launched; listening on port 11434."
 
