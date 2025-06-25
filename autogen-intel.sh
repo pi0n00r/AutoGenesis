@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-#   AUTOGENESIS – AutoGen Studio v1.3-intel  (Intel-GPU, no Docker)           #
+#   AUTOGENESIS – AutoGen Studio v1.4-intel  (Intel-GPU, no Docker)           #
 ###############################################################################
 set -Eeuo pipefail
 shopt -s inherit_errexit lastpipe
@@ -66,6 +66,114 @@ VENV_DIR="$TARGET_HOME/autogen"
 APPDIR="$TARGET_HOME/.autogenstudio"
 ENV_FILE="$VENV_DIR/.env"
 mkdir -p "$APPDIR" "${LOG_FILE%/*}"
+
+###############################################################################
+# 0) GPU host-prep  ── repo + runtime for Intel • NVIDIA • AMD • CPU-only
+###############################################################################
+log "➜ Detecting GPU(s) and preparing vendor repos/runtimes …"
+
+detect_gpus() {                       # returns 0-3 tokens
+  local pci; pci=$(lspci -nnk | grep -E 'VGA|3D|Display' || true)
+  [[ $pci =~ Intel|i915 ]]   && echo intel
+  [[ $pci =~ NVIDIA ]]       && echo nvidia
+  [[ $pci =~ AMD|Radeon ]]   && echo amd
+}
+
+# -- helpers --------------------------------------------------------------- #
+add_apt_component() {                 # ensure a sources.list has component
+  local comp=$1
+  grep -Eqs "^[^#].*\s$comp(\s|$)" /etc/apt/sources.list && return
+  log "  • Enabling APT component: $comp"
+  run_cmd sed -i "s/ main/ main $comp/" /etc/apt/sources.list
+  apt_updated=false
+}
+
+add_repo_intel() {
+  local file=/etc/apt/sources.list.d/intel-gpu.list
+  [[ -f $file ]] && return
+  log "  • Adding Intel Graphics (oneAPI) repo"
+  run_cmd install -d -m 0755 /etc/apt/keyrings
+  run_cmd curl -fsSL https://repositories.intel.com/graphics/intel-graphics.key \
+        -o /etc/apt/keyrings/intel.asc
+  run_cmd chmod a+r /etc/apt/keyrings/intel.asc
+  run_cmd bash -c \
+    "echo 'deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/intel.asc] \
+https://repositories.intel.com/graphics/ all main' > $file"
+  apt_updated=false
+}
+
+add_repo_nvidia() {
+  local codename arch list gpg url_base
+  codename=$( . /etc/os-release && echo $VERSION_CODENAME )
+  arch=$(dpkg --print-architecture)
+  list=/etc/apt/sources.list.d/nvidia-cuda.list
+  [[ -f $list ]] && return
+  log "  • Adding NVIDIA CUDA repo"
+  url_base="https://developer.download.nvidia.com/compute/cuda/repos/$codename/$arch"
+  run_cmd install -d -m 0755 /etc/apt/keyrings
+  run_cmd curl -fsSL "$url_base/3bf863cc.pub" \
+        -o /etc/apt/keyrings/nvidia.asc
+  run_cmd chmod a+r /etc/apt/keyrings/nvidia.asc
+  run_cmd bash -c \
+    "echo 'deb [arch=$arch signed-by=/etc/apt/keyrings/nvidia.asc] $url_base /' > $list"
+  apt_updated=false
+}
+
+add_repo_amd() {
+  local file=/etc/apt/sources.list.d/rocm.list
+  [[ -f $file ]] && return
+  log "  • Adding AMD ROCm repo"
+  run_cmd install -d -m 0755 /etc/apt/keyrings
+  run_cmd curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+        -o /etc/apt/keyrings/rocm.asc
+  run_cmd chmod a+r /etc/apt/keyrings/rocm.asc
+  run_cmd bash -c \
+    "echo 'deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/rocm.asc] \
+https://repo.radeon.com/rocm/apt/debian/ $( . /etc/os-release && echo $VERSION_CODENAME ) main' > $file"
+  apt_updated=false
+}
+
+# -- main ------------------------------------------------------------------ #
+GPU_LIST=($(detect_gpus))
+[[ ${#GPU_LIST[@]} -eq 0 ]] && GPU_LIST=(cpu)
+
+# Make sure non-free components are on so drivers are visible
+for c in contrib non-free non-free-firmware; do add_apt_component "$c"; done
+
+# Add vendor repos (if needed)
+for v in "${GPU_LIST[@]}"; do
+  case $v in
+    intel)  add_repo_intel  ;;
+    nvidia) add_repo_nvidia ;;
+    amd)    add_repo_amd    ;;
+  esac
+done
+
+# Package lists per vendor
+declare -A GPU_PKGS
+GPU_PKGS[intel]="intel-media-va-driver-non-free intel-opencl-icd intel-level-zero-gpu libmfx1 vainfo clinfo"
+GPU_PKGS[nvidia]="cuda-drivers nvidia-compute-utils nvidia-opencl-dev nvidia-smi"
+GPU_PKGS[amd]="rocm-opencl-runtime mesa-opencl-icd rocm-smi-lib64 vainfo clinfo"
+GPU_PKGS[cpu]="vainfo clinfo"
+
+for v in "${GPU_LIST[@]}"; do
+  log "  • Installing $v runtime packages"
+  for p in ${GPU_PKGS[$v]}; do ensure_pkg "$p"; done
+done
+
+log "Adding $TARGET_USER to render,video groups"
+run_cmd usermod -aG render,video "$TARGET_USER"
+
+# Optional vendor-specific tweaks (harmless if they fail)
+if [[ " ${GPU_LIST[*]} " == *" nvidia "* && ! $DRY_RUN ]]; then
+  nvidia-smi -pm 1 || warn "Could not set NVIDIA persistence mode (non-fatal)"
+fi
+if [[ " ${GPU_LIST[*]} " == *" amd "* && ! $DRY_RUN ]]; then
+  run_cmd udevadm control --reload-rules
+  run_cmd udevadm trigger
+fi
+
+log "GPU host-prep complete: detected → ${GPU_LIST[*]}"
 
 ###############################################################################
 # 1) base packages + self-healing helpers
