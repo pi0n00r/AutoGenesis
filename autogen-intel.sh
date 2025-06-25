@@ -68,6 +68,21 @@ ENV_FILE="$VENV_DIR/.env"
 mkdir -p "$APPDIR" "${LOG_FILE%/*}"
 
 ###############################################################################
+#  0) Intel GPU host-prep
+###############################################################################
+log "Installing Intel GPU VA-API, OpenCL & Level-Zero runtimes"
+run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq update
+run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
+    intel-media-va-driver-non-free \
+    intel-opencl-icd \
+    intel-level-zero-gpu \
+    libmfx1 \
+    vainfo \
+    clinfo
+log "Adding $TARGET_USER to render,video groups"
+run_cmd usermod -aG render,video "$TARGET_USER"
+
+###############################################################################
 # 1) base packages + self-healing helpers
 ###############################################################################
 readonly PKGS=(
