@@ -9,17 +9,12 @@ cd /   # NOTHING before this (avoids dpkg-hook “Permission denied”)
 
 #######################################  constants & colours  #################
 readonly SCRIPT_NAME="${0##*/}"
-readonly DEF_DB_USER="${AUTOGEN_DB_USER:-autogen_user}"
-readonly DEF_DB_NAME="${AUTOGEN_DB_NAME:-autogen}"
-readonly LOG_FILE="/var/log/autogen_setup.log"
 readonly COLOR_RESET=$'\e[0m'; readonly RED=$'\e[31m'; readonly YELLOW=$'\e[33m'; readonly GREEN=$'\e[32m'
 
 #######################################  mutable globals  #####################
 ASSUME_YES=false
-DRY_RUN=false
 START_DAEMON=false
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.6.2}"
-OLLAMA_API_URL="${OLLAMA_API_URL:-}"
 TARGET_USER='' TARGET_HOME='' VENV_DIR='' APPDIR='' ENV_FILE=''
 HOST_SETUP_SCRIPT="$(dirname "$0")/host_and_ollama_setup.sh"
 
@@ -87,7 +82,14 @@ fi
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 VENV_DIR="$TARGET_HOME/autogen"
 APPDIR="$TARGET_HOME/.autogenstudio"
+# point at our real .env
 ENV_FILE="$VENV_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+else
+  error "Missing .env file at $ENV_FILE"; exit 1
+fi
 mkdir -p "$APPDIR" "${LOG_FILE%/*}"
 
 ###############################################################################
@@ -121,17 +123,17 @@ run_cmd systemctl enable --now nftables            # persists firewall rules
 ###############################################################################
 # 2) PostgreSQL role, db, and HBA fix
 ###############################################################################
-role_exists() { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_roles WHERE rolname='$DEF_DB_USER';"; }
-db_exists()   { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_database WHERE datname='$DEF_DB_NAME';"; }
+role_exists() { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_roles WHERE rolname='$AUTOGEN_DB_USER';"; }
+db_exists()   { sudo -u postgres psql -tAqc "SELECT 1 FROM pg_database WHERE datname='$AUTOGEN_DB_NAME';"; }
 
-DB_PASS="${AUTOGEN_DB_PASS:-$(openssl rand -hex 12)}"
+DB_PASS=${AUTOGEN_DB_PASS:-$(openssl rand -hex 12)}
 
-[[ $(role_exists) == 1 ]] || run_cmd sudo -u postgres psql -qc "CREATE USER $DEF_DB_USER PASSWORD '$DB_PASS';"
-[[ $(db_exists)   == 1 ]] || run_cmd sudo -u postgres createdb -O "$DEF_DB_USER" "$DEF_DB_NAME"
+[[ $(role_exists) == 1 ]] || run_cmd sudo -u postgres psql -qc "CREATE USER $AUTOGEN_DB_USER PASSWORD '$DB_PASS';"
+[[ $(db_exists)   == 1 ]] || run_cmd sudo -u postgres createdb -O "$AUTOGEN_DB_USER" "$AUTOGEN_DB_NAME"
 
 PG_HBA=$(sudo -u postgres psql -tAqc 'SHOW hba_file;')
-if ! grep -qE "^[[:space:]]*local[[:space:]]+all[[:space:]]+$DEF_DB_USER" "$PG_HBA"; then
-  run_cmd sudo awk -v user="$DEF_DB_USER" '
+if ! grep -qE "^[[:space:]]*local[[:space:]]+all[[:space:]]+$AUTOGEN_DB_USER" "$PG_HBA"; then
+  run_cmd sudo awk -v user="$AUTOGEN_DB_USER" '
       BEGIN{done=0}
       /^[[:space:]]*local[[:space:]]+/ && !done{
         print "local   all   " user "   scram-sha-256"
@@ -168,10 +170,10 @@ urlencode() { jq -rn --arg v "$1" '$v|@uri'; }
 if $regen; then
   PASS_URI=$(urlencode "$DB_PASS")
   cat >"$ENV_FILE" <<EOF
-DB_NAME=$DEF_DB_NAME
-DB_USER=$DEF_DB_USER
+DB_NAME=$AUTOGEN_DB_NAME
+DB_USER=$AUTOGEN_DB_USER
 DB_PASSWORD=$DB_PASS
-DATABASE_URL=postgresql+psycopg://$DEF_DB_USER:$PASS_URI@localhost/$DEF_DB_NAME
+DATABASE_URL=postgresql+psycopg://$AUTOGEN_DB_USER:$PASS_URI@localhost/$AUTOGEN_DB_NAME
 OLLAMA_API_URL=${OLLAMA_API_URL:-http://localhost:11434}
 EOF
   run_cmd chown "$TARGET_USER:$TARGET_USER" "$ENV_FILE"
