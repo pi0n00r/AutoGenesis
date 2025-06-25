@@ -15,10 +15,45 @@ readonly LOG_FILE="/var/log/autogen_setup.log"
 readonly COLOR_RESET=$'\e[0m'; readonly RED=$'\e[31m'; readonly YELLOW=$'\e[33m'; readonly GREEN=$'\e[32m'
 
 #######################################  mutable globals  #####################
-ASSUME_YES=false DRY_RUN=false START_DAEMON=false
+ASSUME_YES=false
+DRY_RUN=false
+START_DAEMON=false
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.6.2}"
 OLLAMA_API_URL="${OLLAMA_API_URL:-}"
 TARGET_USER='' TARGET_HOME='' VENV_DIR='' APPDIR='' ENV_FILE=''
+HOST_SETUP_SCRIPT="$(dirname "$0")/host_and_ollama_setup.sh"
+
+#------------------------------------------------------------------------------
+# Install local Ollama via Intel IPEX-LLM portable-zip
+install_local_ollama() {
+  if [ ! -x "$HOST_SETUP_SCRIPT" ]; then
+    error "Cannot find host+ollama setup script at $HOST_SETUP_SCRIPT"
+    exit 1
+  fi
+  log "Installing local Ollama (no external URL given)…"
+  "$HOST_SETUP_SCRIPT" || {
+    error "host_and_ollama_setup.sh failed"
+    exit 1
+  }
+  # point the API client at our new local instance:
+  export OLLAMA_API_URL="http://localhost:11434"
+  log "Set OLLAMA_API_URL=$OLLAMA_API_URL"
+}
+
+usage() {
+  cat <<USAGE
+Usage: sudo $SCRIPT_NAME [OPTIONS]
+  -y, --assume-yes     Non-interactive (accept defaults)
+  -n, --dry-run        Show what would happen, change nothing
+  -d, --daemon         Start Studio immediately (systemd always installed)
+  --ollama-url URL     Use an external Ollama endpoint (skip local install)
+  -h, --help           This help text
+USAGE
+}
+
+if [ -z "${OLLAMA_API_URL:-}" ]; then
+  install_local_ollama
+fi
 
 #######################################  logging helpers  #####################
 log()   { printf '%s %b[INFO ]%b  %s\n'  "$(date +'%F %T')" "$GREEN"  "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
