@@ -8,6 +8,17 @@ INSTALL_PATH="${INSTALL_PATH:-/opt/autogen}"
 INSTALL_GROUP="${INSTALL_GROUP:-autogen}"
 # allow INSTALL_USER to come _only_ from env or --user; fallback to current login
 INSTALL_USER="${INSTALL_USER:-$(logname 2>/dev/null || echo "$USER")}"
+# Fallbacks for container or Proxmox shell environments
+if [[ -z "$INSTALL_USER" || "$INSTALL_USER" == "root" ]]; then
+  # Try to detect install user from file or directory ownership
+  DETECTED_USER=$(stat -c '%U' "$HOME" 2>/dev/null || echo "")
+  
+  if [[ -n "$DETECTED_USER" && "$DETECTED_USER" != "root" ]]; then
+    INSTALL_USER="$DETECTED_USER"
+  else
+    error "Cannot determine a non-root INSTALL_USER. Try: INSTALL_USER=<youruser> ./install.sh"
+  fi
+fi
 
 PARSED=$(getopt -o p:g:u: -l path:,group:,user: -- "$@")
 eval set -- "$PARSED"
