@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+log()   { echo "[install][info] $*"; }
+error() { echo "[install][error] $*" >&2; exit 1; }
+
 ### 1) CONFIGURABLES & AUTO-DETECTION ###
-# you can override these in your env before calling the script:
 # you can override these in your env or via -p,-g,-u flags:
 INSTALL_PATH="${INSTALL_PATH:-/opt/autogen}"
 INSTALL_GROUP="${INSTALL_GROUP:-autogen}"
@@ -34,9 +36,6 @@ done
 ENV_FILE="$(pwd)/.env"
 AUTOGEN_SH_URL="https://raw.githubusercontent.com/pi0n00r/AutoGenesis/patch-1/autogen.sh"
 HOST_SETUP_URL="https://raw.githubusercontent.com/pi0n00r/AutoGenesis/patch-1/host_and_ollama_setup.sh"
-
-log()   { echo "[install][info] $*"; }
-error() { echo "[install][error] $*" >&2; exit 1; }
 
 ### 2) PRE-CHECKS ###
 if [[ $EUID -ne 0 ]]; then
