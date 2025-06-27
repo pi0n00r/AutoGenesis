@@ -12,7 +12,7 @@ DRY_RUN=false
 # track if user passed --ollama-url
 OLLAMA_API_URL_CMDLINE=false
 
-trap 'rc=$?; echo "$(date +'%F %T') [ERROR] at line $LINENO: \"$BASH_COMMAND\" (exit $rc)" | tee -a "$LOG_FILE" >&2' ERR
+trap 'rc=$?; echo "$(date "+%F %T") [ERROR] at line $LINENO: \"$BASH_COMMAND\" (exit $rc)" | tee -a "$LOG_FILE" >&2' ERR
 
 # nothing before this to avoid dpkg hook issues
 cd /
@@ -32,10 +32,10 @@ readonly GREEN=$'\e[32m'
 START_DAEMON=false
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.6.2}"
 TARGET_USER=''
-TARGET_HOME=''
-VENV_DIR=''
-APPDIR=''
-ENV_FILE=''
+: "${TARGET_HOME:=$(getent passwd "$TARGET_USER" | cut -d: -f6)}"
+: "${VENV_DIR:=$TARGET_HOME/autogen}"
+: "${APPDIR:=$TARGET_HOME/.autogenstudio}"
+: "${ENV_FILE:=$VENV_DIR/.env"}"
 # use BASH_SOURCE so symlinks still resolve
 HOST_SETUP_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/host_and_ollama_setup.sh"
 
