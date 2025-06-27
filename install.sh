@@ -3,10 +3,22 @@ set -Eeuo pipefail
 
 ### 1) CONFIGURABLES & AUTO-DETECTION ###
 # you can override these in your env before calling the script:
+# you can override these in your env or via -p,-g,-u flags:
 INSTALL_PATH="${INSTALL_PATH:-/opt/autogen}"
 INSTALL_GROUP="${INSTALL_GROUP:-autogen}"
-# determine a non-root user to own files & run Studio
-INSTALL_USER="${INSTALL_USER:-$(logname 2>/dev/null || echo ${SUDO_USER:-$USER})}"
+# allow INSTALL_USER to come _only_ from env or --user; fallback to current login
+INSTALL_USER="${INSTALL_USER:-$(logname 2>/dev/null || echo "$USER")}"
+
+PARSED=$(getopt -o p:g:u: -l path:,group:,user: -- "$@")
+eval set -- "$PARSED"
+while true; do
+  case "$1" in
+    -p|--path)   INSTALL_PATH=$2; shift 2;;
+    -g|--group)  INSTALL_GROUP=$2; shift 2;;
+    -u|--user)   INSTALL_USER=$2; shift 2;;
+    --) shift; break;;
+  esac
+done
 
 ENV_FILE="$(pwd)/.env"
 AUTOGEN_SH_URL="https://raw.githubusercontent.com/pi0n00r/AutoGenesis/patch-1/autogen.sh"
@@ -58,7 +70,7 @@ else
 fi
 
 ### 6) INVOKE INSTALLER ###
-export SUDO_USER="$INSTALL_USER"
+
 # preserve env via -E; -y skips interactive prompts if supported
 if $RUN_HOST_SETUP; then
   log "Running host + Ollama setup…"
@@ -70,8 +82,11 @@ export VENV_DIR="$INSTALL_PATH"
 export ENV_FILE="$VENV_DIR/.env"
 
 log "Running AutoGen Studio installer…"
-sudo -E bash autogen.sh "$@" || error "autogen.sh failed"
-
+sudo -E bash autogen.sh \
+  --user "$INSTALL_USER" \
+  --dry-run \
+  "$@" \
+  || error "autogen.sh failed"
 
 ### 7) ENABLE & START SYSTEMD SERVICE ###
 SERVICE="autogen@${INSTALL_USER}.service"
