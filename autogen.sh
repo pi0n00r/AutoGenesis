@@ -43,6 +43,10 @@ VENV_DIR=""
 APPDIR=""
 ENV_FILE=""
 
+# Respect INSTALL_USER from environment or fallback to root
+export TARGET_USER="${INSTALL_USER:-${SUDO_USER:-root}}"
+
+
 ###############################################################################
 #  Logging                                                                   #
 ###############################################################################
@@ -137,11 +141,16 @@ parse_cli() {
 
 detect_target_user() {
   [[ $EUID -eq 0 ]] || { _error "Run with sudo/root."; exit 1; }
-  if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
-    TARGET_USER=$SUDO_USER
+
+  # Prefer INSTALL_USER from env, then fallback to SUDO_USER
+  if [[ -n ${INSTALL_USER:-} && $INSTALL_USER != root ]]; then
+    TARGET_USER="$INSTALL_USER"
+  elif [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
+    TARGET_USER="$SUDO_USER"
   else
-    _error "Cannot determine non-root user (SUDO_USER unset)"; exit 1
+    _error "Cannot determine non-root user (INSTALL_USER or SUDO_USER not set)"; exit 1
   fi
+
   TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
   VENV_DIR="$TARGET_HOME/autogen"
   APPDIR="$TARGET_HOME/.autogenstudio"
