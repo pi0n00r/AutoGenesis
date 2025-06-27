@@ -91,11 +91,16 @@ export TARGET_HOME="$INSTALL_PATH"
 export VENV_DIR="$INSTALL_PATH"
 export ENV_FILE="$VENV_DIR/.env"
 
+# Strip out flags that autogen.sh doesn't support
+INSTALL_ARGS=()
+for arg in "$@"; do
+  [[ "$arg" == "--dry-run" ]] && continue
+  INSTALL_ARGS+=("$arg")
+done
+
 log "Running AutoGen Studio installer…"
 sudo -E bash autogen.sh \
-  --user "$INSTALL_USER" \
-  --dry-run \
-  "$@" \
+  "${INSTALL_ARGS[@]}" \
   || error "autogen.sh failed"
 
 ### 7) ENABLE & START SYSTEMD SERVICE ###
