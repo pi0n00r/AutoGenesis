@@ -64,6 +64,10 @@ if $RUN_HOST_SETUP; then
   log "Running host + Ollama setup…"
   sudo -E bash host_and_ollama_setup.sh || error "host setup failed"
 fi
+export TARGET_USER="$INSTALL_USER"
+export TARGET_HOME="$INSTALL_PATH"
+export VENV_DIR="$INSTALL_PATH"
+export ENV_FILE="$VENV_DIR/.env"
 
 log "Running AutoGen Studio installer…"
 sudo -E bash autogen.sh --daemon || error "autogen.sh failed"
