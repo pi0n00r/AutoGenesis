@@ -70,7 +70,8 @@ export VENV_DIR="$INSTALL_PATH"
 export ENV_FILE="$VENV_DIR/.env"
 
 log "Running AutoGen Studio installer…"
-sudo -E bash autogen.sh --daemon || error "autogen.sh failed"
+sudo -E bash autogen.sh "$@" || error "autogen.sh failed"
+
 
 ### 7) ENABLE & START SYSTEMD SERVICE ###
 SERVICE="autogen@${INSTALL_USER}.service"
