@@ -243,7 +243,8 @@ table inet filter {
 }
 EOF
     run_cmd "chmod 640 $NFTA_SNIPPET"
-    grep -q autogen.nft /etc/nftables.conf 2>/dev/null || run_cmd "bash -c 'echo "include \"${NFTA_SNIPPET}\"' >> /etc/nftables.conf'"
+    grep -q autogen.nft /etc/nftables.conf 2>/dev/null \
+      || run_cmd bash -c "echo include \${NFTA_SNIPPET} >> /etc/nftables.conf"
     run_cmd "nft -f /etc/nftables.conf"
   fi
 }
