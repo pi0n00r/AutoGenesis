@@ -306,7 +306,7 @@ ${INTEL_VARS}
 [Install]
 WantedBy=multi-user.target
 EOF
-    elif [[ -n $INTEL_VARS && ! grep -q ONEAPI_DEVICE_SELECTOR "$UNIT_O" ]]; then
+    elif [[ -n "$INTEL_VARS" ]] && ! grep -q ONEAPI_DEVICE_SELECTOR "$UNIT_O"; then
       run_cmd "sed -i '/^RestartSec/a ${INTEL_VARS//$'\n'/\\n}' $UNIT_O"
     fi
 
