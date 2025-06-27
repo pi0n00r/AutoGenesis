@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -Eeuo pipefail
 
 ### 1) CONFIGURABLES & AUTO-DETECTION ###
