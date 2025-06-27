@@ -1,65 +1,77 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-########################################################################
-#  install.sh                                                         #
-#                                                                      #
-#  1) clones (or updates) the AutoGenesis repo,                        #
-#  2) sources your .env,                                               
-#  3) runs host prep + Ollama bootstrap,                               #
-#  4) runs the main autogen.sh installer,                              #
-#  5) reloads & enables the autogen systemd service.                  #
-########################################################################
+### 1) CONFIGURABLES & AUTO-DETECTION ###
+# you can override these in your env before calling the script:
+INSTALL_PATH="${INSTALL_PATH:-/opt/autogen}"
+INSTALL_GROUP="${INSTALL_GROUP:-autogen}"
+# determine a non-root user to own files & run Studio
+INSTALL_USER="${INSTALL_USER:-$(logname 2>/dev/null || echo ${SUDO_USER:-$USER})}"
 
-# Adjust these if your repo lives elsewhere
-REPO_URL="https://github.com/pi0n00r/AutoGenesis.git"
-BRANCH="${BRANCH:-patch-1}"       # override via env if you need another branch
-WORKDIR="${WORKDIR:-$PWD/AutoGenesis}"
+ENV_FILE="$(pwd)/.env"
+AUTOGEN_SH_URL="https://raw.githubusercontent.com/pi0n00r/AutoGenesis/patch-1/autogen.sh"
+HOST_SETUP_URL="https://raw.githubusercontent.com/pi0n00r/AutoGenesis/patch-1/host_and_ollama_setup.sh"
 
-log()   { echo "[INSTALL][INFO]  $*"; }
-error() { echo "[INSTALL][ERROR] $*" >&2; exit 1; }
+log()   { echo "[install][info] $*"; }
+error() { echo "[install][error] $*" >&2; exit 1; }
 
-# 1) Clone or update
-if [[ -d "$WORKDIR/.git" ]]; then
-  log "Updating existing repo in $WORKDIR…"
-  git -C "$WORKDIR" fetch origin "$BRANCH"
-  git -C "$WORKDIR" checkout "$BRANCH"
-  git -C "$WORKDIR" pull --ff-only origin "$BRANCH"
-else
-  log "Cloning $REPO_URL ($BRANCH) into $WORKDIR…"
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$WORKDIR" \
-    || error "git clone failed"
+### 2) PRE-CHECKS ###
+if [[ $EUID -ne 0 ]]; then
+  error "This script must be run as root (via sudo)."
+fi
+if [[ ! -f "$ENV_FILE" ]]; then
+  error "Missing .env in $(pwd).  Copy .env.example and customize before running."
 fi
 
-cd "$WORKDIR"
-
-# 2) Ensure .env is present
-ENV_FILE="$PWD/.env"
-[[ -f "$ENV_FILE" ]] || error "Missing .env file in $WORKDIR"
-# shellcheck disable=SC1090
 source "$ENV_FILE"
-log "Loaded configuration from .env"
+log "Loaded configuration from $ENV_FILE"
 
-# 3) Host prep & Ollama (requires sudo)
-if [[ -x host_and_ollama_setup.sh ]]; then
+### 3) CREATE GROUP (if missing) ###
+if ! getent group "$INSTALL_GROUP" >/dev/null; then
+  log "Creating group '$INSTALL_GROUP'…"
+  groupadd --system "$INSTALL_GROUP"
+fi
+
+### 4) PREPARE INSTALL DIRECTORY ###
+log "Preparing $INSTALL_PATH (owner=$INSTALL_USER:$INSTALL_GROUP)…"
+mkdir -p "$INSTALL_PATH"
+chown -R "$INSTALL_USER:$INSTALL_GROUP" "$INSTALL_PATH"
+# setgid + 2775 keeps group inheritance & rwx for owner/group
+chmod g+s "$INSTALL_PATH"
+chmod -R 2775 "$INSTALL_PATH"
+
+### 5) FETCH UPSTREAM SCRIPTS ###
+cd "$INSTALL_PATH"
+log "Downloading autogen.sh…"
+curl -fsSL "$AUTOGEN_SH_URL" -o autogen.sh
+chmod +x autogen.sh
+
+# only fetch host_setup if Ollama isn't already present
+if ! command -v ollama >/dev/null; then
+  log "Downloading host_and_ollama_setup.sh…"
+  curl -fsSL "$HOST_SETUP_URL" -o host_and_ollama_setup.sh
+  chmod +x host_and_ollama_setup.sh
+  RUN_HOST_SETUP=true
+else
+  log "ollama binary found—skipping host setup."
+  RUN_HOST_SETUP=false
+fi
+
+### 6) INVOKE INSTALLER ###
+export SUDO_USER="$INSTALL_USER"
+# preserve env via -E; -y skips interactive prompts if supported
+if $RUN_HOST_SETUP; then
   log "Running host + Ollama setup…"
-  sudo bash host_and_ollama_setup.sh || error "host_and_ollama_setup.sh failed"
-else
-  error "host_and_ollama_setup.sh not found or not executable"
+  sudo -E bash host_and_ollama_setup.sh || error "host setup failed"
 fi
 
-# 4) Main autogen install (also requires sudo for DB + systemd)
-if [[ -x autogen.sh ]]; then
-  log "Running autogen.sh installer…"
-  sudo bash autogen.sh -y || error "autogen.sh failed"
-else
-  error "autogen.sh not found or not executable"
-fi
+log "Running AutoGen Studio installer…"
+sudo -E bash autogen.sh --daemon || error "autogen.sh failed"
 
-# 5) Enable & start the systemd unit (templated by autogen.sh)
-SERVICE="autogen@${SUDO_USER:-$USER}.service"
-log "Reloading systemd and enabling $SERVICE…"
-sudo systemctl daemon-reload
-sudo systemctl enable --now "$SERVICE" || error "Failed to enable $SERVICE"
+### 7) ENABLE & START SYSTEMD SERVICE ###
+SERVICE="autogen@${INSTALL_USER}.service"
+log "Reloading systemd & enabling $SERVICE…"
+systemctl daemon-reload
+systemctl enable --now "$SERVICE" || error "Failed to enable $SERVICE"
 
-log "All done! 🎉"
+log "🎉 Installation complete – Studio available on port 3000"
