@@ -25,3 +25,14 @@
 ```bash
 git clone https://github.com/pi0n00r/AutoGenesis.git
 cd AutoGenesis
+2. Configure .env as needed
+Tweak paths, ports, or LLM backend by editing the included .env file.
+
+3. Run the installer
+bash
+bash install.sh
+🔬 Experimental Status
+This is an active, exploratory project. Use with curiosity—PRs and feedback welcome.
+
+📄 License & Credits
+Forked from fitoori/AutoGenesis Shell scripting, LXC integration, and modular design by @pi0n00r Licensed under the MIT License
