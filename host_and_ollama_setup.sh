@@ -34,11 +34,26 @@ err() { echo "$(date +'%F %T') [HOST_SETUP][ERROR] $*" | tee -a "$LOG_FILE" >&2;
 # 1) Host prep for Intel‐GPU build
 ########################################
 REPO_URL="https://github.com/pi0n00r/self-hosted-ai-starter-kit.git"
-BRANCH="compose-intel-gpu-and-build"
+BRANCH="gpu-expanded"
 
 log "Cloning self-hosted-ai-starter-kit (branch: $BRANCH)…"
 run_cmd rm -rf self-hosted-ai-starter-kit
 run_cmd git clone --depth 1 --branch "$BRANCH" "$REPO_URL" || err "git clone failed"
+
+# Verify expected files and directories exist
+EXPECTED_PATHS=(
+  "self-hosted-ai-starter-kit/docker-compose.yml"
+  "self-hosted-ai-starter-kit/.env"
+  "self-hosted-ai-starter-kit/host-prep/host-prep.sh"
+)
+
+for path in "${EXPECTED_PATHS[@]}"; do
+  if [[ ! -e "$path" ]]; then
+    err "Missing expected file or directory: $path"
+  fi
+done
+
+log "Post-clone verification passed: all expected files are present."
 
 cd self-hosted-ai-starter-kit/host-prep || err "Cannot enter host-prep directory"
 log "Running host-prep.sh (GPU profile)…"
