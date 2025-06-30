@@ -1,8 +1,8 @@
 # AutoGenesis
 
-🚀 **Experimental Installer for Microsoft AutoGen**
+🚀 **Installer for Microsoft AutoGen**
 
-[![Latest Release](https://img.shields.io/github/v/release/pi0n00r/AutoGenesis?include_prereleases&label=AutoGenesis%20Release)](https://github.com/pi0n00r/AutoGenesis/releases/tag/v0.1.1-experimental)
+[![Latest Release](https://img.shields.io/github/v/release/pi0n00r/AutoGenesis?include_prereleases&label=AutoGenesis%20Release)](https://github.com/pi0n00r/AutoGenesis/releases/tag/v0.1.2-experimental)
 
 > Modular and extensible, with PostgreSQL and Ollama fallback baked in.
 
