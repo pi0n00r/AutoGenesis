@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-#   AUTOGENESIS – AutoGen Studio v1.3-intel  (Intel-GPU, no Docker)           #
+#   AUTOGENESIS – AutoGen Studio v1.4.1-intel  (Intel-GPU, no Docker)           #
 ###############################################################################
 set -Eeuo pipefail
 shopt -s inherit_errexit lastpipe
@@ -19,6 +19,7 @@ ASSUME_YES=false DRY_RUN=false START_DAEMON=false
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.6.2}"
 OLLAMA_API_URL="${OLLAMA_API_URL:-}"
 TARGET_USER='' TARGET_HOME='' VENV_DIR='' APPDIR='' ENV_FILE=''
+CLI_URL_GIVEN=false
 
 #######################################  logging helpers  #####################
 log()   { printf '%s %b[INFO ]%b  %s\n'  "$(date +'%F %T')" "$GREEN"  "$COLOR_RESET" "$*" | tee -a "$LOG_FILE"; }
@@ -26,7 +27,7 @@ warn()  { printf '%s %b[WARN ]%b  %s\n'  "$(date +'%F %T')" "$YELLOW" "$COLOR_RE
 error() { printf '%s %b[ERROR]%b %s\n'   "$(date +'%F %T')" "$RED"    "$COLOR_RESET" "$*" | tee -a "$LOG_FILE" >&2; }
 
 #######################################  helpers  #############################
-run_cmd() { $DRY_RUN && { printf 'DRY-RUN: %q\n' "$*"; return; }; eval "$@"; }
+run_cmd() { $DRY_RUN && { printf 'DRY-RUN: %q\n' "$*"; return; }; "$@"; }
 usage() { cat <<USAGE
 Usage: sudo $SCRIPT_NAME [OPTIONS]
   -y, --assume-yes     Non-interactive (accept defaults)
@@ -45,7 +46,7 @@ while true; do
     -y|--assume-yes) ASSUME_YES=true ;;
     -n|--dry-run)    DRY_RUN=true ;;
     -d|--daemon)     START_DAEMON=true ;;
-    --ollama-url)    OLLAMA_API_URL=$2; shift ;;
+    --ollama-url)    OLLAMA_API_URL=$2; shift; CLI_URL_GIVEN=true ;;
     -h|--help)       usage; exit 0 ;;
     --) shift; break ;;
   esac; shift; done
@@ -67,20 +68,6 @@ APPDIR="$TARGET_HOME/.autogenstudio"
 ENV_FILE="$VENV_DIR/.env"
 mkdir -p "$APPDIR" "${LOG_FILE%/*}"
 
-###############################################################################
-#  0) Intel GPU host-prep
-###############################################################################
-log "Installing Intel GPU VA-API, OpenCL & Level-Zero runtimes"
-run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq update
-run_cmd DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
-    intel-media-va-driver-non-free \
-    intel-opencl-icd \
-    intel-level-zero-gpu \
-    libmfx1 \
-    vainfo \
-    clinfo
-log "Adding $TARGET_USER to render,video groups"
-run_cmd usermod -aG render,video "$TARGET_USER"
 
 ###############################################################################
 # 1) base packages + self-healing helpers
@@ -153,7 +140,7 @@ run_cmd chown -R "$TARGET_USER:$TARGET_USER" "$VENV_DIR" "$APPDIR"
 ###############################################################################
 validate_env() { ! grep -vE '^\s*(#|$)' "$1" | grep -qvE '^[A-Za-z_][A-Za-z0-9_]*=.*$'; }
 regen=false
-[[ ! -f "$ENV_FILE" || ! $(validate_env "$ENV_FILE") ]] && regen=true
+if [[ ! -f "$ENV_FILE" ]] || ! validate_env "$ENV_FILE"; then regen=true; fi
 
 urlencode() { jq -rn --arg v "$1" '$v|@uri'; }
 
@@ -223,7 +210,7 @@ if [[ -z $OLLAMA_API_URL ]]; then
 fi
 
 # If user explicitly provided an endpoint, only probe; abort on failure.
-if [[ -n ${OLLAMA_API_URL_CMDLINE:-} ]]; then
+if $CLI_URL_GIVEN; then
   probe_ollama "$OLLAMA_API_URL" || { error "Provided --ollama-url unreachable"; exit 1; }
 else
   # manage local instance
